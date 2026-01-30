@@ -1,79 +1,40 @@
 using ContactManagement.Api.Data;
 using ContactManagement.Api.Extensions;
+using ContactManagement.Api.Middleware;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
 
-// ============ SERVICE CONFIGURATION ============
-
-// Database
-builder.Services.AddDatabase(builder.Configuration);
-
-// Identity (User Management)
-builder.Services.AddIdentityServices();
-
-// JWT Authentication
-builder.Services.AddJwtAuthentication(builder.Configuration);
-
-// Application Services (DI)
-builder.Services.AddApplicationServices();
-
-// FluentValidation
-builder.Services.AddValidation();
-
-// Controllers
+// ============ SERVICE CONFIGURATION (ONE LINE!) ============
+builder.Services.AddApplicationServices(builder.Configuration);
 builder.Services.AddControllers();
-
-// Swagger/OpenAPI
-builder.Services.AddSwaggerDocumentation();
-
-// CORS (for frontend integration)
-builder.Services.AddCors(options =>
-{
-    options.AddPolicy("AllowAll", policy =>
-    {
-        policy.AllowAnyOrigin()
-              .AllowAnyMethod()
-              .AllowAnyHeader();
-    });
-});
 
 var app = builder.Build();
 
 // ============ MIDDLEWARE PIPELINE ============
+app.UseExceptionHandling();
 
-// Development-only middleware
 if (app.Environment.IsDevelopment())
 {
     app.UseSwagger();
-    app.UseSwaggerUI(options =>
-    {
-        options.SwaggerEndpoint("/swagger/v1/swagger.json", "Contact Management API v1");
-    });
+    app.UseSwaggerUI();
 }
 
-// HTTPS redirection (comment out for Docker/local development if needed)
-// app.UseHttpsRedirection();
-
 app.UseCors("AllowAll");
-
-// Authentication & Authorization (order matters!)
 app.UseAuthentication();
 app.UseAuthorization();
-
 app.MapControllers();
 
 // ============ DATABASE MIGRATION ============
-// Automatically apply migrations on startup
-using (var scope = app.Services.CreateScope())
+await using (var scope = app.Services.CreateAsyncScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
     var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
-    
+
     try
     {
         logger.LogInformation("Applying database migrations...");
-        db.Database.Migrate();
+        await db.Database.MigrateAsync();
         logger.LogInformation("Database migrations applied successfully");
     }
     catch (Exception ex)

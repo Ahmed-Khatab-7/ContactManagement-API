@@ -13,14 +13,29 @@ using Microsoft.OpenApi.Models;
 
 namespace ContactManagement.Api.Extensions;
 
-/// <summary>
-/// Extension methods to keep Program.cs clean and organized.
-/// Each method configures a specific aspect of the application.
-/// </summary>
 public static class ServiceExtensions
 {
-    public static IServiceCollection AddDatabase(
-        this IServiceCollection services, 
+
+    public static IServiceCollection AddApplicationServices(
+        this IServiceCollection services,
+        IConfiguration configuration)
+    {
+        services
+            .AddDatabase(configuration)
+            .AddIdentityServices()
+            .AddJwtAuthentication(configuration)
+            .AddBusinessServices()
+            .AddValidation()
+            .AddSwaggerDocumentation()
+            .AddCorsPolicy();
+
+        return services;
+    }
+
+    #region Private Extension Methods
+
+    private static IServiceCollection AddDatabase(
+        this IServiceCollection services,
         IConfiguration configuration)
     {
         services.AddDbContext<ApplicationDbContext>(options =>
@@ -37,7 +52,7 @@ public static class ServiceExtensions
         return services;
     }
 
-    public static IServiceCollection AddIdentityServices(this IServiceCollection services)
+    private static IServiceCollection AddIdentityServices(this IServiceCollection services)
     {
         services.AddIdentity<ApplicationUser, IdentityRole>(options =>
         {
@@ -47,10 +62,10 @@ public static class ServiceExtensions
             options.Password.RequireUppercase = true;
             options.Password.RequireNonAlphanumeric = true;
             options.Password.RequiredLength = 8;
-            
+
             // User settings
             options.User.RequireUniqueEmail = true;
-            
+
             // Lockout settings
             options.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(5);
             options.Lockout.MaxFailedAccessAttempts = 5;
@@ -61,12 +76,12 @@ public static class ServiceExtensions
         return services;
     }
 
-    public static IServiceCollection AddJwtAuthentication(
-        this IServiceCollection services, 
+    private static IServiceCollection AddJwtAuthentication(
+        this IServiceCollection services,
         IConfiguration configuration)
     {
         var jwtSettings = configuration.GetSection("JwtSettings");
-        var secretKey = jwtSettings["SecretKey"] 
+        var secretKey = jwtSettings["SecretKey"]
             ?? throw new InvalidOperationException("JWT SecretKey not configured");
 
         services.AddAuthentication(options =>
@@ -86,30 +101,30 @@ public static class ServiceExtensions
                 ValidAudience = jwtSettings["Audience"],
                 IssuerSigningKey = new SymmetricSecurityKey(
                     Encoding.UTF8.GetBytes(secretKey)),
-                ClockSkew = TimeSpan.Zero // No clock skew tolerance
+                ClockSkew = TimeSpan.Zero
             };
         });
 
         return services;
     }
 
-    public static IServiceCollection AddApplicationServices(this IServiceCollection services)
+    private static IServiceCollection AddBusinessServices(this IServiceCollection services)
     {
         services.AddScoped<IAuthService, AuthService>();
         services.AddScoped<IContactService, ContactService>();
-        
+
         return services;
     }
 
-    public static IServiceCollection AddValidation(this IServiceCollection services)
+    private static IServiceCollection AddValidation(this IServiceCollection services)
     {
         services.AddFluentValidationAutoValidation();
         services.AddValidatorsFromAssemblyContaining<Program>();
-        
+
         return services;
     }
 
-    public static IServiceCollection AddSwaggerDocumentation(this IServiceCollection services)
+    private static IServiceCollection AddSwaggerDocumentation(this IServiceCollection services)
     {
         services.AddEndpointsApiExplorer();
         services.AddSwaggerGen(options =>
@@ -121,7 +136,6 @@ public static class ServiceExtensions
                 Description = "A secure API for managing personal contacts"
             });
 
-            // Add JWT Authentication to Swagger
             options.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
             {
                 Description = "JWT Authorization header using the Bearer scheme. Enter 'Bearer' [space] and then your token",
@@ -149,4 +163,21 @@ public static class ServiceExtensions
 
         return services;
     }
+
+    private static IServiceCollection AddCorsPolicy(this IServiceCollection services)
+    {
+        services.AddCors(options =>
+        {
+            options.AddPolicy("AllowAll", policy =>
+            {
+                policy.AllowAnyOrigin()
+                      .AllowAnyMethod()
+                      .AllowAnyHeader();
+            });
+        });
+
+        return services;
+    }
+
+    #endregion
 }

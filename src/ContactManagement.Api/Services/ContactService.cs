@@ -6,11 +6,6 @@ using Microsoft.EntityFrameworkCore;
 
 namespace ContactManagement.Api.Services;
 
-/// <summary>
-/// Contact business logic service.
-/// KEY POINT: Every method requires userId and filters data accordingly.
-/// This ensures users can ONLY access their own contacts.
-/// </summary>
 public class ContactService : IContactService
 {
     private readonly ApplicationDbContext _context;
@@ -30,7 +25,6 @@ public class ContactService : IContactService
         bool sortDescending = false,
         string? searchTerm = null)
     {
-        // Start with user's contacts only - DATA ISOLATION!
         var query = _context.Contacts
             .AsNoTracking()
             .Where(c => c.UserId == userId);
@@ -46,26 +40,10 @@ public class ContactService : IContactService
                 (c.PhoneNumber != null && c.PhoneNumber.Contains(term)));
         }
 
-        // Get total count before pagination
         var totalCount = await query.CountAsync();
 
         // Apply sorting
-        query = sortBy?.ToLower() switch
-        {
-            "name" => sortDescending 
-                ? query.OrderByDescending(c => c.LastName).ThenByDescending(c => c.FirstName)
-                : query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName),
-            "birthdate" => sortDescending
-                ? query.OrderByDescending(c => c.BirthDate)
-                : query.OrderBy(c => c.BirthDate),
-            "email" => sortDescending
-                ? query.OrderByDescending(c => c.Email)
-                : query.OrderBy(c => c.Email),
-            "createdat" => sortDescending
-                ? query.OrderByDescending(c => c.CreatedAt)
-                : query.OrderBy(c => c.CreatedAt),
-            _ => query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName) // Default sort
-        };
+        query = ApplySorting(query, sortBy, sortDescending);
 
         // Apply pagination
         var contacts = await query
@@ -96,65 +74,54 @@ public class ContactService : IContactService
 
     public async Task<ContactDto> CreateContactAsync(string userId, CreateContactDto dto)
     {
-        var contact = new Contact
-        {
-            FirstName = dto.FirstName.Trim(),
-            LastName = dto.LastName.Trim(),
-            Email = dto.Email.Trim().ToLower(),
-            PhoneNumber = dto.PhoneNumber?.Trim(),
-            BirthDate = dto.BirthDate,
-            Address = dto.Address?.Trim(),
-            Notes = dto.Notes?.Trim(),
-            UserId = userId, // Associate with current user
-            CreatedAt = DateTime.UtcNow
-        };
+        var contact = Contact.Create(
+            firstName: dto.FirstName,
+            lastName: dto.LastName,
+            email: dto.Email,
+            userId: userId,
+            phoneNumber: dto.PhoneNumber,
+            birthDate: dto.BirthDate,
+            address: dto.Address,
+            notes: dto.Notes
+        );
 
         _context.Contacts.Add(contact);
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation(
-            "Contact {ContactId} created for user {UserId}", 
-            contact.Id, userId);
+        _logger.LogInformation("Contact {ContactId} created for user {UserId}", contact.Id, userId);
 
         return MapToDto(contact);
     }
 
-    public async Task<ContactDto?> UpdateContactAsync(
-        string userId, 
-        int contactId, 
-        UpdateContactDto dto)
+    public async Task<ContactDto?> UpdateContactAsync(string userId, int contactId, UpdateContactDto dto)
     {
-        // Find contact AND verify ownership
         var contact = await _context.Contacts
             .FirstOrDefaultAsync(c => c.Id == contactId && c.UserId == userId);
 
         if (contact == null)
         {
-            return null; // Contact doesn't exist OR doesn't belong to this user
+            return null;
         }
 
-        // Update properties
-        contact.FirstName = dto.FirstName.Trim();
-        contact.LastName = dto.LastName.Trim();
-        contact.Email = dto.Email.Trim().ToLower();
-        contact.PhoneNumber = dto.PhoneNumber?.Trim();
-        contact.BirthDate = dto.BirthDate;
-        contact.Address = dto.Address?.Trim();
-        contact.Notes = dto.Notes?.Trim();
-        contact.UpdatedAt = DateTime.UtcNow;
+        contact.Update(
+            firstName: dto.FirstName,
+            lastName: dto.LastName,
+            email: dto.Email,
+            phoneNumber: dto.PhoneNumber,
+            birthDate: dto.BirthDate,
+            address: dto.Address,
+            notes: dto.Notes
+        );
 
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation(
-            "Contact {ContactId} updated by user {UserId}", 
-            contactId, userId);
+        _logger.LogInformation("Contact {ContactId} updated by user {UserId}", contactId, userId);
 
         return MapToDto(contact);
     }
 
     public async Task<bool> DeleteContactAsync(string userId, int contactId)
     {
-        // Find and verify ownership in one query
         var contact = await _context.Contacts
             .FirstOrDefaultAsync(c => c.Id == contactId && c.UserId == userId);
 
@@ -163,17 +130,40 @@ public class ContactService : IContactService
             return false;
         }
 
-        _context.Contacts.Remove(contact);
+        // Soft delete
+        contact.Delete();
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation(
-            "Contact {ContactId} deleted by user {UserId}", 
-            contactId, userId);
+        _logger.LogInformation("Contact {ContactId} soft deleted by user {UserId}", contactId, userId);
 
         return true;
     }
 
-    // Helper method to map Entity to DTO
+    #region Private Methods
+
+    private static IQueryable<Contact> ApplySorting(
+        IQueryable<Contact> query,
+        string? sortBy,
+        bool sortDescending)
+    {
+        return sortBy?.ToLower() switch
+        {
+            "name" => sortDescending
+                ? query.OrderByDescending(c => c.LastName).ThenByDescending(c => c.FirstName)
+                : query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName),
+            "birthdate" => sortDescending
+                ? query.OrderByDescending(c => c.BirthDate)
+                : query.OrderBy(c => c.BirthDate),
+            "email" => sortDescending
+                ? query.OrderByDescending(c => c.Email)
+                : query.OrderBy(c => c.Email),
+            "createdat" => sortDescending
+                ? query.OrderByDescending(c => c.CreatedAt)
+                : query.OrderBy(c => c.CreatedAt),
+            _ => query.OrderBy(c => c.LastName).ThenBy(c => c.FirstName)
+        };
+    }
+
     private static ContactDto MapToDto(Contact contact) => new(
         Id: contact.Id,
         FirstName: contact.FirstName,
@@ -182,8 +172,8 @@ public class ContactService : IContactService
         PhoneNumber: contact.PhoneNumber,
         BirthDate: contact.BirthDate,
         Address: contact.Address,
-        Notes: contact.Notes,
-        CreatedAt: contact.CreatedAt,
-        UpdatedAt: contact.UpdatedAt
+        Notes: contact.Notes
     );
+
+    #endregion
 }
